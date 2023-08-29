@@ -1,12 +1,15 @@
 from telethon import TelegramClient, events, sync, utils
-from telethon.tl.types import InputChannel, MessageEntityTextUrl, MessageEntityBold, MessageEntityUnderline
+from telethon.tl.types import InputChannel, MessageEntityTextUrl, MessageEntityBold, MessageEntityUnderline, MessageMediaPhoto
+
+import lark_oapi as lark
+from lark_oapi.api.im.v1 import *
+from lark_oapi.api.auth.v3 import *
 
 import json
 import yaml
 import logging
-
-import lark_oapi as lark
-from lark_oapi.api.im.v1 import *
+import requests
+from requests_toolbelt import MultipartEncoder
 
 ''' 
 ------------------------------------------------------------------------
@@ -34,12 +37,34 @@ larkClient = lark.Client.builder() \
     .domain("https://open.larksuite.com") \
     .build()
 
+def getTenantToken() :
+    # 构造请求对象
+    request: InternalTenantAccessTokenRequest = InternalTenantAccessTokenRequest.builder() \
+        .request_body(InternalTenantAccessTokenRequestBody.builder()
+                      .app_id(config["lark_app_id"])
+                      .app_secret(config["lark_app_secret"])
+                      .build()) \
+        .build()
+
+    # 发起请求
+    response: InternalTenantAccessTokenResponse = larkClient.auth.v3.tenant_access_token.internal(request)
+
+    # 处理失败返回
+    if not response.success():
+        lark.logger.error(
+            f"client.auth.v3.tenant_access_token.internal failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
+        return
+
+    # 处理业务结果
+    print(response.raw.content)
+
+# Send msg to Lark group
 def sendMsg(msg):
     # Construct request
     request: CreateMessageRequest = CreateMessageRequest.builder() \
         .receive_id_type("chat_id") \
         .request_body(CreateMessageRequestBody.builder()
-                      .receive_id("oc_e81e3be03b3bdb0251d0d6127eb1e5f9")
+                      .receive_id("oc_b22069cc62e369fe43c07d9a2ca5ebea") # oc_e81e3be03b3bdb0251d0d6127eb1e5f9
                       .msg_type("post")
                       .content(msg)
                       .build()) \
@@ -53,6 +78,28 @@ def sendMsg(msg):
         lark.logger.error(
             f"client.im.v1.message.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
         return
+
+# Upload img to Lark server
+def uploadImage(photoInBytes):
+    url = "https://open.larksuite.com/open-apis/im/v1/images"
+
+    form = {
+        'image_type': 'message',
+        'image': ('image.jpg', photoInBytes, 'image/jpeg')
+    } 
+    multi_form = MultipartEncoder(form)
+
+    headers = {
+        'Authorization': f'Bearer {config["lark_tenant"]}',
+        'Content-Type': multi_form.content_type
+    }
+
+    response = requests.request("POST", url, headers=headers, data=multi_form)
+    raw = json.loads(response.content.decode('utf-8'))
+    image_key = raw['data']['image_key']
+    print(f"Uploaded image for message with key {image_key}")
+
+    return image_key
 
 def start():
     # Telegram Client Init
@@ -95,13 +142,22 @@ def start():
     @client.on(events.NewMessage(chats=input_channels_entities))
     async def handler(event):
         for output_channel in output_channel_entities:
-            print("\n Message received")
+            print("\n Message received \n")
             msg = event.message.message
+            entities = event.message.entities
+            media = event.message.media
             formatted_msg = { "en_us": { "content": [[]] } }
             content = formatted_msg["en_us"]["content"][0]
 
-            if event.message.entities:
-                entities = event.message.entities
+            if media:
+                if type(media) is MessageMediaPhoto:
+                    # Get the photo as binary data
+                    photo = await event.message.download_media(file=bytes)
+                    # Upload image to Lark so that it can be sent
+                    image_key = uploadImage(photo)
+                    content.append({ "tag": "img", "image_key": image_key })
+
+            if entities:
                 # Get all words with entity (e.g. bold, link, underline...)
                 words_with_entity = utils.get_inner_text(msg, entities)
 
@@ -123,7 +179,9 @@ def start():
                     if index == len(words_with_entity) - 1: 
                         content.append({ "tag": "text", "text": msg })
             else:
-                content.append({ "tag": "text", "text": msg })
+                # If there are photo captions, and not just an image was sent
+                if msg:
+                    content.append({ "tag": "text", "text": msg })
 
             # this will forward your message to lark
             sendMsg(json.dumps(formatted_msg))
