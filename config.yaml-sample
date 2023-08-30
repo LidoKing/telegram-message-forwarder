@@ -7,9 +7,17 @@ api_hash: '********************************'
 # Session name. Only one session (with a unique session name) can run at a time | With quotes
 session_name: 'forwardgram' 
 
-# Discord Bot Token. Go create a bot on discord. | No quotes
-discord_bot_token: '*****************************************************'
+# Lark app id
+lark_app_id: '********************'
 
+# Lark app secret
+lark_app_secret: '*******************************'
+
+# Lark tenant access token
+lark_tenant: '*****************************************'
+
+# Lark group id
+lark_group_id: '**********************************'
 
 # The channel names that you'd like to forward messages from. Just add input telegram channel names here.
 # The user running the client must have these channels present on it's dialogs. 
