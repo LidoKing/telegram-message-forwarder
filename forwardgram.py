@@ -64,7 +64,7 @@ def sendMsg(msg):
     request: CreateMessageRequest = CreateMessageRequest.builder() \
         .receive_id_type("chat_id") \
         .request_body(CreateMessageRequestBody.builder()
-                      .receive_id("oc_b22069cc62e369fe43c07d9a2ca5ebea") # oc_e81e3be03b3bdb0251d0d6127eb1e5f9
+                      .receive_id(config["lark_group_id"])
                       .msg_type("post")
                       .content(msg)
                       .build()) \
@@ -101,6 +101,11 @@ def uploadImage(photoInBytes):
 
     return image_key
 
+def excludeImage(channelId):
+    # Exclude BujiDAO channel images
+    if channelId == 1648734310: return True
+    else: return False
+
 def start():
     # Telegram Client Init
     client = TelegramClient(config["session_name"], 
@@ -113,7 +118,7 @@ def start():
 
     # Input Messages Telegram Channels will be stored in these empty Entities
     input_channels_entities = []
-    output_channel_entities = [0]
+    output_channel_entities = []
 
     # Iterating over dialogs and finding new entities and pushing them to our empty entities list above
     for d in client.iter_dialogs():
@@ -141,50 +146,51 @@ def start():
 
     @client.on(events.NewMessage(chats=input_channels_entities))
     async def handler(event):
-        for output_channel in output_channel_entities:
-            print("\n Message received \n")
-            msg = event.message.message
-            entities = event.message.entities
-            media = event.message.media
-            formatted_msg = { "en_us": { "content": [[]] } }
-            content = formatted_msg["en_us"]["content"][0]
+        print("\n Message received \n")
+        from_channel_id = event.message.peer_id.channel_id
+        msg = event.message.message
+        entities = event.message.entities
+        media = event.message.media
+        formatted_msg = { "en_us": { "content": [[]] } }
+        content = formatted_msg["en_us"]["content"][0]
 
-            if media:
-                if type(media) is MessageMediaPhoto:
-                    # Get the photo as binary data
-                    photo = await event.message.download_media(file=bytes)
-                    # Upload image to Lark so that it can be sent
-                    image_key = uploadImage(photo)
-                    content.append({ "tag": "img", "image_key": image_key })
+        # Ignore image from BujiDAO channel
+        if media and not excludeImage(from_channel_id):
+            if type(media) is MessageMediaPhoto:
+                # Get the photo as binary data
+                photo = await event.message.download_media(file=bytes)
+                # Upload image to Lark so that it can be sent
+                image_key = uploadImage(photo)
+                content.append({ "tag": "img", "image_key": image_key })
 
-            if entities:
-                # Get all words with entity (e.g. bold, link, underline...)
-                words_with_entity = utils.get_inner_text(msg, entities)
+        if entities:
+            # Get all words with entity (e.g. bold, link, underline...)
+            words_with_entity = utils.get_inner_text(msg, entities)
 
-                for index, word in enumerate(words_with_entity):
-                    # Get correct offset, offset provided by Telegram is not accurate
-                    offset = msg.find(word)
-                    length = len(word)
-                    end = offset + length
+            for index, word in enumerate(words_with_entity):
+                # Get correct offset, offset provided by Telegram is not accurate
+                offset = msg.find(word)
+                length = len(word)
+                end = offset + length
 
-                    entity_type = type(entities[index])
-                    # Use text urls as a separator
-                    # everything before a text url is normal text
-                    if entity_type is MessageEntityTextUrl:
-                        content.append({ "tag": "text", "text": msg[:offset] })
-                        content.append({ "tag": "a", "href": entities[index].url, "text": msg[offset:end] })
-                        msg = msg[end:]
+                entity_type = type(entities[index])
+                # Use text urls as a separator
+                # everything before a text url is normal text
+                if entity_type is MessageEntityTextUrl:
+                    content.append({ "tag": "text", "text": msg[:offset] })
+                    content.append({ "tag": "a", "href": entities[index].url, "text": msg[offset:end] })
+                    msg = msg[end:]
 
-                    # Append remaining msg as normal text if it is last entity
-                    if index == len(words_with_entity) - 1: 
-                        content.append({ "tag": "text", "text": msg })
-            else:
-                # If there are photo captions, and not just an image was sent
-                if msg:
+                # Append remaining msg as normal text if it is last entity
+                if index == len(words_with_entity) - 1: 
                     content.append({ "tag": "text", "text": msg })
+        else:
+            # If there are photo captions, and not just an image was sent
+            if msg:
+                content.append({ "tag": "text", "text": msg })
 
-            # this will forward your message to lark
-            sendMsg(json.dumps(formatted_msg))
+        # this will forward your message to lark
+        sendMsg(json.dumps(formatted_msg))
 
     client.run_until_disconnected()
 
