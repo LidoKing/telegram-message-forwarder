@@ -55,8 +55,9 @@ def getTenantToken() :
             f"client.auth.v3.tenant_access_token.internal failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
         return
 
-    # 处理业务结果
-    print(response.raw.content)
+    raw = json.loads(response.raw.content.decode('utf-8'))
+
+    return raw['tenant_access_token']
 
 # Send msg to Lark group
 def sendMsg(msg):
@@ -90,7 +91,7 @@ def uploadImage(photoInBytes):
     multi_form = MultipartEncoder(form)
 
     headers = {
-        'Authorization': f'Bearer {config["lark_tenant"]}',
+        'Authorization': f'Bearer {getTenantToken()}',
         'Content-Type': multi_form.content_type
     }
 
